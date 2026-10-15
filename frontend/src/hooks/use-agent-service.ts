@@ -41,8 +41,9 @@ const getHttpBaseUrl = () => {
   const configuredUrl = import.meta.env.VITE_API_URL
   if (configuredUrl) return configuredUrl.replace(/\/$/, "")
 
-  const websocketUrl = import.meta.env.VITE_WS_URL || "ws://localhost:8080/ws"
-  return websocketUrl.replace(/^ws/, "http").replace(/\/ws\/?$/, "")
+  // const websocketUrl = import.meta.env.VITE_WS_URL || "ws://localhost:8080/ws"
+  // return websocketUrl.replace(/^ws/, "http").replace(/\/ws\/?$/, "")
+  return "http://localhost:8080"
 }
 
 const readConversation = (): MessagePayload[] => {

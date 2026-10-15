@@ -1,9 +1,10 @@
 import React, { ChangeEvent, useRef, useState } from "react"
 import { ChatPanel } from "./components/ChatPanel"
-import { FileViewer, FileViewerHandle } from "./components/FileViewer"
+import { FileViewer } from "./components/FileViewer"
+// import { FileViewerHandle } from "./components/FileViewer"
 import { PDFCoverPreview } from "./components/PDFCoverPreview"
 import { useAgentService } from "./hooks/use-agent-service"
-import { usePDFService } from "./hooks/use-pdf-service"
+// import { usePDFService } from "./hooks/use-pdf-service"
 import { filesToDataUrls } from "./lib/file-utils"
 import { Container } from "./Container"
 import { useIOSViewportFix } from "./hooks/use-ios-viewport-fix"
@@ -47,11 +48,11 @@ export default function App() {
   const [filePreviews, setFilePreviews] = useState<Record<string, string>>({})
   const [pendingImageFiles, setPendingImageFiles] = useState<File[]>([])
   const [hasStarted, setHasStarted] = useState(conversation.length > 0)
-  const [pdfViewer, setPdfViewer] = useState<FileViewerHandle | null>(null)
+  // const [pdfViewer, setPdfViewer] = useState<FileViewerHandle | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
   const [apiError, setApiError] = useState<string | null>(null)
-  usePDFService(pdfViewer)
+  // usePDFService(pdfViewer)
 
   const pdfFile = uploadedFiles.find((f) => f.type === "application/pdf")
   const imageFiles = uploadedFiles.filter((f) => f.type.startsWith("image/"))
@@ -189,7 +190,7 @@ export default function App() {
       setHasStarted(false)
       setApiError(null)
       clearAgentError()
-      setPdfViewer(null)
+      // setPdfViewer(null)
       if (inputRef.current) inputRef.current.value = ""
     } catch (error) {
       const message =
@@ -554,7 +555,10 @@ export default function App() {
         {hasStarted && (
           <div className="min-h-0 flex-1 flex w-full h-full animate-in fade-in duration-500 overscroll-contain touch-auto">
             {uploadedFiles.length > 0 && (
-              <FileViewer ref={setPdfViewer} files={uploadedFiles} />
+              <>
+                {/* <FileViewer ref={setPdfViewer} files={uploadedFiles} /> */}
+                <FileViewer files={uploadedFiles} />
+              </>
             )}
             <ChatPanel
               isFullScreen={uploadedFiles.length === 0}

@@ -3,7 +3,7 @@ import { createRoot } from "react-dom/client"
 import "./index.css"
 import App from "./App"
 import Introduction from "./Introduction"
-import { WebSocketProvider } from "./context/WebSocketContext"
+// import { WebSocketProvider } from "./context/WebSocketContext"
 
 const rootElement = document.getElementById("root")
 
@@ -19,12 +19,14 @@ if (typeof window !== 'undefined' && 'scrollRestoration' in window.history) {
 const page =
   window.location.pathname === "/introduction" ? <Introduction /> : <App />
 
-createRoot(rootElement).render(
-  <StrictMode>
-    <WebSocketProvider
-      url={import.meta.env.VITE_WS_URL || "ws://localhost:8080/ws"}
-    >
-      {page}
-    </WebSocketProvider>
-  </StrictMode>,
-)
+// WebSocket support is disabled until the backend provides its WebSocket route.
+// createRoot(rootElement).render(
+//   <StrictMode>
+//     <WebSocketProvider
+//       url={import.meta.env.VITE_WS_URL || "ws://localhost:8080/ws"}
+//     >
+//       {page}
+//     </WebSocketProvider>
+//   </StrictMode>,
+// )
+createRoot(rootElement).render(<StrictMode>{page}</StrictMode>)
