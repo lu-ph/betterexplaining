@@ -4,6 +4,8 @@ import remarkGfm from "remark-gfm"
 import remarkMath from "remark-math"
 import rehypeKatex from "rehype-katex"
 import type { ChatMessage } from "../hooks/use-agent-service"
+import { RESPONSE_ACTION_PROMPTS } from "../config/response-actions"
+import { DrawingPad } from "./DrawingPad"
 
 interface ChatPanelProps {
   isFullScreen: boolean
@@ -11,7 +13,8 @@ interface ChatPanelProps {
   currentReply: string
   isGenerating: boolean
   canSendMessage: boolean
-  onSend: (prompt: string) => void
+  onSend: (prompt: string, displayUserMessage?: boolean) => void
+  onSendDrawing: (image: string) => void
   onUploadImages: (files: File[]) => void
   pendingImageCount: number
   onInterrupt: () => void
@@ -91,6 +94,125 @@ const markdownComponents = {
   },
 }
 
+interface McqOption {
+  label: string
+  text: string
+}
+
+const parseMcq = (value: string) => {
+  const openingTag = /<MCQ\s*>/i.exec(value)
+  if (!openingTag) {
+    const partialTag = /<(?:M(?:C(?:Q)?)?)?\s*$/i.exec(value)
+    return {
+      text: partialTag ? value.slice(0, partialTag.index) : value,
+      options: [] as McqOption[],
+    }
+  }
+
+  const contentStart = openingTag.index + openingTag[0].length
+  const closingTag = /<\/MCQ\s*>/i.exec(value.slice(contentStart))
+  if (!closingTag) {
+    return { text: value.slice(0, openingTag.index), options: [] as McqOption[] }
+  }
+
+  const contentEnd = contentStart + closingTag.index
+  const content = value.slice(contentStart, contentEnd)
+  const options: McqOption[] = []
+
+  for (const line of content.split(/\r?\n/)) {
+    const optionMatch = /^\s*([a-z])\.\s*(.*)$/i.exec(line)
+    if (optionMatch) {
+      options.push({
+        label: optionMatch[1].toLowerCase(),
+        text: optionMatch[2].trim(),
+      })
+    } else if (options.length > 0 && line.trim()) {
+      options[options.length - 1].text += ` ${line.trim()}`
+    }
+  }
+
+  const afterBlock = value.slice(contentEnd + closingTag[0].length)
+  return {
+    text: `${value.slice(0, openingTag.index)}${afterBlock}`,
+    options,
+  }
+}
+
+function AssistantMessageContent({
+  text,
+  canSendMessage,
+  isGenerating,
+  onSend,
+}: {
+  text: string
+  canSendMessage: boolean
+  isGenerating: boolean
+  onSend: (prompt: string, displayUserMessage?: boolean) => void
+}) {
+  const [selectedOption, setSelectedOption] = useState<string | null>(null)
+  const parsed = parseMcq(text)
+
+  return (
+    <>
+      {parsed.text.trim() && (
+        <div className="w-full text-neutral-200 text-[15px] leading-relaxed tracking-normal [&_a]:text-sky-400 [&_a]:underline [&_blockquote]:border-l-2 [&_blockquote]:border-neutral-700 [&_blockquote]:pl-4 [&_code]:rounded [&_code]:bg-white/[0.08] [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:font-mono [&_code]:text-xs [&_pre]:my-4 [&_pre]:overflow-x-auto [&_pre]:rounded-xl [&_pre]:bg-black/50 [&_pre]:p-4 [&_pre]:border [&_pre]:border-white/[0.08] [&_pre_code]:bg-transparent [&_h1]:mb-3 [&_h1]:mt-6 [&_h1]:text-xl [&_h1]:font-semibold [&_h1]:text-white [&_h2]:mb-3 [&_h2]:mt-5 [&_h2]:text-lg [&_h2]:font-semibold [&_h2]:text-white [&_hr]:my-6 [&_hr]:border-white/[0.08] [&_ol]:my-3 [&_table]:my-4 [&_table]:w-full [&_td]:border [&_td]:border-neutral-800 [&_td]:px-3 [&_td]:py-2 [&_th]:border [&_th]:border-neutral-800 [&_th]:bg-neutral-900 [&_th]:px-3 [&_th]:py-2">
+          <ReactMarkdown
+            remarkPlugins={[remarkGfm, remarkMath]}
+            rehypePlugins={[rehypeKatex]}
+            components={markdownComponents}
+          >
+            {normalizeMathDelimiters(parsed.text)}
+          </ReactMarkdown>
+        </div>
+      )}
+      {parsed.options.length > 0 && (
+        <div className="mt-4 flex max-w-xl flex-col gap-2">
+          {parsed.options.map((option) => (
+            <button
+              key={option.label}
+              type="button"
+              disabled={
+                selectedOption !== null || !canSendMessage || isGenerating
+              }
+              aria-pressed={selectedOption === option.label}
+              onClick={() => {
+                if (selectedOption !== null || !canSendMessage || isGenerating)
+                  return
+                setSelectedOption(option.label)
+                onSend(
+                  `用户选择了选项${option.label}. ${option.text}`,
+                  false,
+                )
+              }}
+              className={`w-full rounded-xl border px-4 py-3 text-left text-sm leading-relaxed transition-colors disabled:cursor-not-allowed ${
+                selectedOption === option.label
+                  ? "border-indigo-400/50 bg-indigo-500/15 text-white"
+                  : "border-white/[0.1] bg-white/[0.04] text-neutral-300 hover:border-indigo-400/50 hover:bg-indigo-500/10 hover:text-white disabled:hover:border-white/[0.1] disabled:hover:bg-white/[0.04] disabled:hover:text-neutral-300"
+              } [&_a]:text-sky-400 [&_a]:underline [&_code]:rounded [&_code]:bg-white/[0.08] [&_code]:px-1 [&_code]:font-mono [&_.katex]:text-inherit`}
+            >
+              <span className="mr-2 font-semibold text-indigo-300">
+                {option.label}.
+              </span>
+              <ReactMarkdown
+                remarkPlugins={[remarkGfm, remarkMath]}
+                rehypePlugins={[rehypeKatex]}
+                components={{
+                  ...markdownComponents,
+                  p({ children }) {
+                    return <span>{children}</span>
+                  },
+                }}
+              >
+                {normalizeMathDelimiters(option.text)}
+              </ReactMarkdown>
+            </button>
+          ))}
+        </div>
+      )}
+    </>
+  )
+}
+
 export function ChatPanel({
   isFullScreen,
   chatHistory,
@@ -98,11 +220,13 @@ export function ChatPanel({
   isGenerating,
   canSendMessage,
   onSend,
+  onSendDrawing,
   onUploadImages,
   pendingImageCount,
   onInterrupt,
 }: ChatPanelProps) {
   const [prompt, setPrompt] = useState("")
+  const [isDrawingPadOpen, setIsDrawingPadOpen] = useState(false)
   const scrollRef = useRef<HTMLDivElement>(null)
   const imageInputRef = useRef<HTMLInputElement>(null)
 
@@ -126,6 +250,11 @@ export function ChatPanel({
   }
 
   const lastMessage = chatHistory[chatHistory.length - 1]
+  const latestAgentMessageIndex = chatHistory.reduce(
+    (latestIndex, message, index) =>
+      message.role === "agent" ? index : latestIndex,
+    -1,
+  )
   const shouldRenderCurrentReply = lastMessage?.role !== "agent"
 
   return (
@@ -136,7 +265,9 @@ export function ChatPanel({
     >
       <div
         ref={scrollRef}
-        className="min-h-0 flex-1 overflow-y-auto px-6 md:px-12 pt-8 pb-36 space-y-9 scroll-smooth"
+        className={`min-h-0 flex-1 overflow-y-auto px-6 md:px-12 pt-8 pb-36 space-y-9 scroll-smooth ${
+          isFullScreen ? "mx-auto w-full max-w-4xl" : "w-full"
+        }`}
       >
         {chatHistory.map((message, index) => (
           <div
@@ -225,105 +356,168 @@ export function ChatPanel({
                 )}
               </div>
             ) : (
-              <div className="w-full text-neutral-200 text-[15px] leading-relaxed tracking-normal [&_a]:text-sky-400 [&_a]:underline [&_blockquote]:border-l-2 [&_blockquote]:border-neutral-700 [&_blockquote]:pl-4 [&_code]:rounded [&_code]:bg-white/[0.08] [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:font-mono [&_code]:text-xs [&_pre]:my-4 [&_pre]:overflow-x-auto [&_pre]:rounded-xl [&_pre]:bg-black/50 [&_pre]:p-4 [&_pre]:border [&_pre]:border-white/[0.08] [&_pre_code]:bg-transparent [&_h1]:mb-3 [&_h1]:mt-6 [&_h1]:text-xl [&_h1]:font-semibold [&_h1]:text-white [&_h2]:mb-3 [&_h2]:mt-5 [&_h2]:text-lg [&_h2]:font-semibold [&_h2]:text-white [&_hr]:my-6 [&_hr]:border-white/[0.08] [&_ol]:my-3 [&_table]:my-4 [&_table]:w-full [&_td]:border [&_td]:border-neutral-800 [&_td]:px-3 [&_td]:py-2 [&_th]:border [&_th]:border-neutral-800 [&_th]:bg-neutral-900 [&_th]:px-3 [&_th]:py-2">
-                <ReactMarkdown
-                  remarkPlugins={[remarkGfm, remarkMath]}
-                  rehypePlugins={[rehypeKatex]}
-                  components={markdownComponents}
-                >
-                  {normalizeMathDelimiters(message.text)}
-                </ReactMarkdown>
-              </div>
+              <>
+                <AssistantMessageContent
+                  text={message.text}
+                  canSendMessage={canSendMessage}
+                  isGenerating={isGenerating}
+                  onSend={onSend}
+                />
+                {message.role === "agent" &&
+                  index === latestAgentMessageIndex &&
+                  !isGenerating && (
+                    <>
+                      <div className="mt-4 flex flex-wrap gap-2">
+                        {Object.entries(RESPONSE_ACTION_PROMPTS).map(
+                          ([label, actionPrompt]) => (
+                            <button
+                              key={label}
+                              type="button"
+                              onClick={() => onSend(actionPrompt, false)}
+                              disabled={!canSendMessage || isGenerating}
+                              className="rounded-xl border border-white/[0.1] bg-white/[0.04] px-3.5 py-2 text-xs font-medium text-neutral-300 transition-colors hover:border-white/20 hover:bg-white/[0.08] hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                              {label}
+                            </button>
+                          ),
+                        )}
+                      </div>
+                    </>
+                  )}
+              </>
             )}
           </div>
         ))}
 
-        {(isGenerating || currentReply) && shouldRenderCurrentReply && (
-          <div className="w-full max-w-3xl text-neutral-200 text-[15px] leading-relaxed">
-            {isGenerating && !currentReply && (
-              <div className="flex items-center gap-2 py-2 text-sm font-medium text-neutral-300 animate-pulse">
-                <span className="h-2 w-2 rounded-full bg-neutral-300 animate-pulse" />
-                <span>正在思考...</span>
-              </div>
-            )}
-            {currentReply && (
-              <div className="[&_a]:text-sky-400 [&_a]:underline [&_blockquote]:border-l-2 [&_blockquote]:border-neutral-700 [&_blockquote]:pl-4 [&_code]:rounded [&_code]:bg-white/[0.08] [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:font-mono [&_code]:text-xs [&_pre]:my-4 [&_pre]:overflow-x-auto [&_pre]:rounded-xl [&_pre]:bg-black/50 [&_pre]:p-4 [&_pre]:border [&_pre]:border-white/[0.08] [&_pre_code]:bg-transparent [&_h1]:mb-3 [&_h1]:mt-6 [&_h1]:text-xl [&_h1]:font-semibold [&_h1]:text-white [&_h2]:mb-3 [&_h2]:mt-5 [&_h2]:text-lg [&_h2]:font-semibold [&_h2]:text-white [&_hr]:my-6 [&_hr]:border-white/[0.08] [&_ol]:my-3 [&_table]:my-4 [&_table]:w-full [&_td]:border [&_td]:border-neutral-800 [&_td]:px-3 [&_td]:py-2 [&_th]:border [&_th]:border-neutral-800 [&_th]:bg-neutral-900 [&_th]:px-3 [&_th]:py-2">
-                <ReactMarkdown
-                  remarkPlugins={[remarkGfm, remarkMath]}
-                  rehypePlugins={[rehypeKatex]}
-                  components={markdownComponents}
-                >
-                  {normalizeMathDelimiters(currentReply)}
-                </ReactMarkdown>
-              </div>
-            )}
-          </div>
-        )}
+        {(isGenerating || currentReply) &&
+          (shouldRenderCurrentReply ||
+            (isGenerating &&
+              !currentReply &&
+              lastMessage?.role === "agent")) && (
+            <div className="w-full max-w-3xl text-neutral-200 text-[15px] leading-relaxed">
+              {isGenerating && !currentReply && (
+                <div className="flex items-center gap-2 py-2 text-sm font-medium text-neutral-300 animate-pulse">
+                  <span className="h-2 w-2 rounded-full bg-neutral-300 animate-pulse" />
+                  <span>正在思考...</span>
+                </div>
+              )}
+              {currentReply && (
+                <AssistantMessageContent
+                  text={currentReply}
+                  canSendMessage={canSendMessage}
+                  isGenerating={isGenerating}
+                  onSend={onSend}
+                />
+              )}
+            </div>
+          )}
       </div>
 
       <div className="absolute bottom-0 left-0 w-full p-6 bg-gradient-to-t from-[#09090B] via-[#09090B]/90 to-transparent pointer-events-none">
-        <form
-          onSubmit={handleSubmit}
-          className="pointer-events-auto relative w-full max-w-2xl mx-auto flex items-center bg-neutral-900/80 backdrop-blur-xl border border-white/[0.1] rounded-2xl p-1.5 shadow-2xl focus-within:border-white/20 focus-within:ring-1 focus-within:ring-white/20 transition-all duration-200 group"
-        >
-          <button
-            type="button"
-            onClick={() => imageInputRef.current?.click()}
-            disabled={!canSendMessage}
-            title={
-              pendingImageCount > 0
-                ? `添加图片（${pendingImageCount} 张待发送）`
-                : "添加图片"
-            }
-            className="relative p-2.5 text-neutral-400 hover:text-white transition-colors rounded-xl hover:bg-white/[0.06] disabled:cursor-not-allowed disabled:opacity-50"
+        <div className="pointer-events-auto mx-auto w-full max-w-2xl">
+          <div
+            className={`mb-3 ${isDrawingPadOpen ? "block" : "hidden"}`}
+            aria-hidden={!isDrawingPadOpen}
           >
-            <svg
-              className="w-5 h-5"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
+            <DrawingPad
+              disabled={!canSendMessage || isGenerating}
+              isVisible={isDrawingPadOpen}
+              onSend={onSendDrawing}
+              onClose={() => setIsDrawingPadOpen(false)}
+            />
+          </div>
+          <div className="mb-2">
+            <button
+              type="button"
+              onClick={() => setIsDrawingPadOpen((open) => !open)}
+              disabled={!canSendMessage || isGenerating}
+              aria-expanded={isDrawingPadOpen}
+              className={`inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-xs font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
+                isDrawingPadOpen
+                  ? "border-indigo-400/40 bg-indigo-500/10 text-indigo-200"
+                  : "border-white/[0.1] bg-white/[0.04] text-neutral-300 hover:border-white/20 hover:bg-white/[0.08] hover:text-white"
+              }`}
             >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={1.75}
-                d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"
-              />
-            </svg>
-            {pendingImageCount > 0 && (
-              <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-indigo-500 px-1 text-[10px] font-semibold text-white">
-                {pendingImageCount}
-              </span>
-            )}
-          </button>
-          <input
-            ref={imageInputRef}
-            type="file"
-            accept="image/*"
-            multiple
-            className="hidden"
-            onChange={(event) => {
-              onUploadImages(Array.from(event.target.files || []))
-              event.target.value = ""
-            }}
-          />
-          <input
-            type="text"
-            placeholder="继续追问..."
-            value={prompt}
-            disabled={!canSendMessage}
-            onChange={(event) => setPrompt(event.target.value)}
-            className="flex-1 bg-transparent border-none focus:outline-none text-white placeholder:text-neutral-500 text-[14px] px-3 disabled:cursor-not-allowed disabled:opacity-50"
-          />
-          <button
-            type={isGenerating ? "button" : "submit"}
-            onClick={isGenerating ? onInterrupt : undefined}
-            disabled={!canSendMessage}
-            className="bg-white text-black px-4 py-2 rounded-xl text-xs font-semibold hover:bg-neutral-200 active:scale-[0.98] transition-all duration-150 disabled:cursor-not-allowed disabled:bg-neutral-800 disabled:text-neutral-500 border border-white/10"
+              <svg
+                className="h-4 w-4"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                aria-hidden="true"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={1.75}
+                  d="m16.862 4.487 1.651-1.651a2.121 2.121 0 0 1 3 3l-9.193 9.193a4.5 4.5 0 0 1-1.897 1.13L8 17l.841-2.423a4.5 4.5 0 0 1 1.13-1.897l6.891-6.891Zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0 1 15.75 21H5.25A2.25 2.25 0 0 1 3 18.75V8.25A2.25 2.25 0 0 1 5.25 6H10"
+                />
+              </svg>
+              手写回答
+            </button>
+          </div>
+          <form
+            onSubmit={handleSubmit}
+            className="relative flex w-full items-center rounded-2xl border border-white/[0.1] bg-neutral-900/80 p-1.5 shadow-2xl backdrop-blur-xl transition-all duration-200 group focus-within:border-white/20 focus-within:ring-1 focus-within:ring-white/20"
           >
-            {!canSendMessage ? "已停止" : isGenerating ? "停止" : "发送"}
-          </button>
-        </form>
+            <button
+              type="button"
+              onClick={() => imageInputRef.current?.click()}
+              disabled={!canSendMessage}
+              title={
+                pendingImageCount > 0
+                  ? `添加图片（${pendingImageCount} 张待发送）`
+                  : "添加图片"
+              }
+              className="relative rounded-xl p-2.5 text-neutral-400 transition-colors hover:bg-white/[0.06] hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <svg
+                className="h-5 w-5"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={1.75}
+                  d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"
+                />
+              </svg>
+              {pendingImageCount > 0 && (
+                <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-indigo-500 px-1 text-[10px] font-semibold text-white">
+                  {pendingImageCount}
+                </span>
+              )}
+            </button>
+            <input
+              ref={imageInputRef}
+              type="file"
+              accept="image/*"
+              multiple
+              className="hidden"
+              onChange={(event) => {
+                onUploadImages(Array.from(event.target.files || []))
+                event.target.value = ""
+              }}
+            />
+            <input
+              type="text"
+              placeholder="继续追问..."
+              value={prompt}
+              disabled={!canSendMessage}
+              onChange={(event) => setPrompt(event.target.value)}
+              className="flex-1 border-none bg-transparent px-3 text-[14px] text-white placeholder:text-neutral-500 focus:outline-none disabled:cursor-not-allowed disabled:opacity-50"
+            />
+            <button
+              type={isGenerating ? "button" : "submit"}
+              onClick={isGenerating ? onInterrupt : undefined}
+              disabled={!canSendMessage}
+              className="rounded-xl border border-white/10 bg-white px-4 py-2 text-xs font-semibold text-black transition-all duration-150 hover:bg-neutral-200 active:scale-[0.98] disabled:cursor-not-allowed disabled:bg-neutral-800 disabled:text-neutral-500"
+            >
+              {!canSendMessage ? "已停止" : isGenerating ? "停止" : "发送"}
+            </button>
+          </form>
+        </div>
       </div>
     </div>
   )

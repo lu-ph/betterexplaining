@@ -109,7 +109,9 @@ export default function App() {
 
   const removeFile = (fileName: string) => {
     setUploadedFiles((prev) => prev.filter((f) => f.name !== fileName))
-    setPendingImageFiles((prev) => prev.filter((file) => file.name !== fileName))
+    setPendingImageFiles((prev) =>
+      prev.filter((file) => file.name !== fileName),
+    )
     if (filePreviews[fileName]) {
       URL.revokeObjectURL(filePreviews[fileName])
       setFilePreviews((prev) => {
@@ -144,16 +146,36 @@ export default function App() {
     }
   }
 
-  const handleChatRequest = async (prompt: string) => {
+  const handleChatRequest = async (
+    prompt: string,
+    displayUserMessage = true,
+  ) => {
     try {
-      const imageData = await filesToDataUrls(pendingImageFiles)
-      await sendChatRequest(prompt, imageData)
-      setPendingImageFiles([])
+      const imageData = displayUserMessage
+        ? await filesToDataUrls(pendingImageFiles)
+        : []
+      await sendChatRequest(prompt, imageData, { displayUserMessage })
+      if (displayUserMessage) setPendingImageFiles([])
     } catch (error) {
       const message = error instanceof Error ? error.message : "消息发送失败"
       console.error("Failed to prepare chat images:", error)
       setApiError(message)
       reportError(message)
+    }
+  }
+
+  const handleSendDrawing = async (drawingImage: string) => {
+    try {
+      const uploadedImageData = await filesToDataUrls(pendingImageFiles)
+      await sendChatRequest("", [...uploadedImageData, drawingImage])
+      setPendingImageFiles([])
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "手写内容发送失败"
+      console.error("Failed to send drawing:", error)
+      setApiError(message)
+      reportError(message)
+      throw error
     }
   }
 
@@ -396,7 +418,7 @@ export default function App() {
           </div>
         </div>
       )}
-  
+
       <header className="h-16 flex items-center px-6 border-b border-white/5 shrink-0 z-10">
         <h1 className="text-xl font-semibold tracking-tight text-white font-serif"></h1>
         {hasStarted && (
@@ -417,11 +439,10 @@ export default function App() {
           这个网页做什么？
         </a>
       </header>
-  
+
       <main className="min-h-0 flex-1 relative overflow-hidden flex flex-col">
         {!hasStarted && (
           <div className="flex-1 w-full max-w-6xl mx-auto flex flex-col h-full p-6 relative">
-            
             <div className="flex-1 min-h-0 flex flex-col items-center justify-center">
               {uploadedFiles.length === 0 ? (
                 <div
@@ -429,8 +450,18 @@ export default function App() {
                   className="w-full max-w-4xl aspect-[21/9] rounded-[2rem] border-2 border-dashed border-neutral-800 bg-neutral-900/20 hover:bg-neutral-800/40 hover:border-neutral-600 transition-all duration-300 flex flex-col items-center justify-center gap-6 cursor-pointer group animate-in fade-in zoom-in-95"
                 >
                   <div className="w-20 h-20 rounded-2xl bg-neutral-800 group-hover:scale-110 transition-transform duration-300 flex items-center justify-center shadow-lg">
-                    <svg className="w-10 h-10 text-neutral-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 4v16m8-8H4" />
+                    <svg
+                      className="w-10 h-10 text-neutral-300"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      stroke="currentColor"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={1.5}
+                        d="M12 4v16m8-8H4"
+                      />
                     </svg>
                   </div>
                   <div className="text-center">
@@ -444,10 +475,12 @@ export default function App() {
                 renderStagingArea()
               )}
             </div>
-  
+
             <div
               className={`shrink-0 w-full max-w-3xl mx-auto px-4 pb-6 mt-auto transition-all duration-500 ${
-                uploadedFiles.length > 0 ? "translate-y-0 opacity-100 scale-100" : ""
+                uploadedFiles.length > 0
+                  ? "translate-y-0 opacity-100 scale-100"
+                  : ""
               }`}
             >
               <div className="relative group flex items-center bg-neutral-900/80 backdrop-blur-xl border border-white/10 rounded-2xl shadow-[0_8px_30px_rgb(0,0,0,0.4)] focus-within:border-neutral-500 focus-within:ring-1 focus-within:ring-neutral-500 transition-all p-2">
@@ -456,34 +489,59 @@ export default function App() {
                   className="w-12 h-12 flex items-center justify-center text-neutral-400 hover:text-white hover:bg-neutral-800 rounded-xl transition-colors"
                   title="添加文件"
                 >
-                  <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
+                  <svg
+                    className="w-6 h-6"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={1.5}
+                      d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"
+                    />
                   </svg>
                 </button>
-  
+
                 <input
                   ref={inputRef}
                   type="text"
-                  placeholder={uploadedFiles.length > 0 ? "向 AI 描述你的需求..." : "输入问题..."}
+                  placeholder={
+                    uploadedFiles.length > 0
+                      ? "向 AI 描述你的需求..."
+                      : "输入问题..."
+                  }
                   className="flex-1 bg-transparent h-12 px-4 focus:outline-none text-white placeholder:text-neutral-500 text-lg"
                   onKeyDown={(e) => {
-                    if (e.key === "Enter") handleStartChat(e.currentTarget.value)
+                    if (e.key === "Enter")
+                      handleStartChat(e.currentTarget.value)
                   }}
                 />
-  
+
                 <button
                   onClick={() => handleStartChat(inputRef.current?.value || "")}
                   className="w-12 h-12 bg-white text-black rounded-xl flex items-center justify-center hover:bg-neutral-200 transition-colors shrink-0"
                 >
-                  <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14 5l7 7m0 0l-7 7m7-7H3" />
+                  <svg
+                    className="w-5 h-5"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M14 5l7 7m0 0l-7 7m7-7H3"
+                    />
                   </svg>
                 </button>
               </div>
             </div>
           </div>
         )}
-  
+
         <input
           type="file"
           ref={fileInputRef}
@@ -492,7 +550,7 @@ export default function App() {
           multiple
           onChange={handleUploadFile}
         />
-  
+
         {hasStarted && (
           <div className="min-h-0 flex-1 flex w-full h-full animate-in fade-in duration-500 overscroll-contain touch-auto">
             {uploadedFiles.length > 0 && (
@@ -505,6 +563,7 @@ export default function App() {
               isGenerating={isGenerating}
               canSendMessage={canSendMessage}
               onSend={handleChatRequest}
+              onSendDrawing={handleSendDrawing}
               onUploadImages={handleUploadImages}
               pendingImageCount={pendingImageFiles.length}
               onInterrupt={interruptChat}

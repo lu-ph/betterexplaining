@@ -12,5 +12,12 @@ body,
   position: fixed;
   top: 0;
   left: 0;
-  touch-action: none; 
+  touch-action: none;
+}
+
+html.drawing-with-pen,
+html.drawing-with-pen * {
+  user-select: none !important;
+  -webkit-user-select: none !important;
+  -webkit-touch-callout: none !important;
 }

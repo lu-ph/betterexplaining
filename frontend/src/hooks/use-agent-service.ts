@@ -6,11 +6,16 @@ export interface MessagePayload {
   role: "user" | "assistant"
   content: string
   image?: string
+  hidden?: boolean
+}
+
+interface SendChatOptions {
+  displayUserMessage?: boolean
 }
 
 export type ChatMessage =
   | { role: "user"; text: string; image?: string }
-  | { role: "agent"; text: string }
+  | { role: "agent"; text: string; id?: string }
   | {
       role: "tool"
       id: string
@@ -27,7 +32,8 @@ const isMessagePayload = (value: unknown): value is MessagePayload => {
   return (
     (value.role === "user" || value.role === "assistant") &&
     typeof value.content === "string" &&
-    (!("image" in value) || typeof value.image === "string")
+    (!("image" in value) || typeof value.image === "string") &&
+    (!("hidden" in value) || typeof value.hidden === "boolean")
   )
 }
 
@@ -69,15 +75,17 @@ const persistConversation = (messages: MessagePayload[]) => {
 }
 
 const toChatHistory = (messages: MessagePayload[]): ChatMessage[] =>
-  messages.map((message) =>
-    message.role === "assistant"
-      ? { role: "agent", text: message.content }
-      : {
-          role: "user",
-          text: message.content,
-          ...(message.image ? { image: message.image } : {}),
-        },
-  )
+  messages
+    .filter((message) => !message.hidden)
+    .map((message) =>
+      message.role === "assistant"
+        ? { role: "agent", text: message.content }
+        : {
+            role: "user",
+            text: message.content,
+            ...(message.image ? { image: message.image } : {}),
+          },
+    )
 
 export const useAgentService = () => {
   const [initialConversation] = useState(readConversation)
@@ -91,10 +99,15 @@ export const useAgentService = () => {
   const [canSendMessage, setCanSendMessage] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const currentReplyRef = useRef("")
+  const replyMessageIdRef = useRef(0)
   const abortControllerRef = useRef<AbortController | null>(null)
 
   const sendChatRequest = useCallback(
-    async (prompt: string, images: string[] = []) => {
+    async (
+      prompt: string,
+      images: string[] = [],
+      { displayUserMessage = true }: SendChatOptions = {},
+    ) => {
       if (abortControllerRef.current) return
 
       setError(null)
@@ -102,13 +115,20 @@ export const useAgentService = () => {
       setCanSendMessage(true)
       currentReplyRef.current = ""
       setCurrentReply("")
+      const replyMessageId = `agent-response-${++replyMessageIdRef.current}`
 
       const userMessages: MessagePayload[] = images.map((image) => ({
         role: "user",
         content: "",
         image,
       }))
-      if (prompt) userMessages.push({ role: "user", content: prompt })
+      if (prompt) {
+        userMessages.push({
+          role: "user",
+          content: prompt,
+          ...(!displayUserMessage ? { hidden: true } : {}),
+        })
+      }
       const nextConversation = [...conversationRef.current, ...userMessages]
       let requestController: AbortController | null = null
 
@@ -116,14 +136,16 @@ export const useAgentService = () => {
         persistConversation(nextConversation)
         conversationRef.current = nextConversation
         setConversation(nextConversation)
-        setChatHistory((prev) => [
-          ...prev,
-          ...userMessages.map((message): ChatMessage => ({
-            role: "user",
-            text: message.content,
-            ...(message.image ? { image: message.image } : {}),
-          })),
-        ])
+        if (displayUserMessage) {
+          setChatHistory((prev) => [
+            ...prev,
+            ...userMessages.map((message): ChatMessage => ({
+              role: "user",
+              text: message.content,
+              ...(message.image ? { image: message.image } : {}),
+            })),
+          ])
+        }
 
         requestController = new AbortController()
         abortControllerRef.current = requestController
@@ -194,17 +216,26 @@ export const useAgentService = () => {
           const reply = currentReplyRef.current
           setCurrentReply(reply)
           setChatHistory((prev) => {
-            const lastMessage = prev[prev.length - 1]
-            if (lastMessage?.role === "agent") {
-              return [...prev.slice(0, -1), { ...lastMessage, text: reply }]
+            const replyIndex = prev.findIndex(
+              (message) =>
+                message.role === "agent" && message.id === replyMessageId,
+            )
+            if (replyIndex !== -1) {
+              return prev.map((message, index) =>
+                index === replyIndex && message.role === "agent"
+                  ? { ...message, text: reply }
+                  : message,
+              )
             }
-            return [...prev, { role: "agent", text: reply }]
+            return [...prev, { role: "agent", id: replyMessageId, text: reply }]
           })
         }
 
         while (!streamFinished) {
           const { done, value } = await reader.read()
-          buffer += decoder.decode(value, { stream: !done }).replace(/\r\n/g, "\n")
+          buffer += decoder
+            .decode(value, { stream: !done })
+            .replace(/\r\n/g, "\n")
 
           let boundary = buffer.indexOf("\n\n")
           while (boundary !== -1) {
